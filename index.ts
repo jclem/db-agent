@@ -4,6 +4,7 @@ import type {
   ChatCompletionChunk,
   ChatCompletionMessageParam,
 } from "openai/resources/index.mjs";
+import pino from "pino";
 import { z } from "zod";
 
 const Message = z.object({
@@ -23,11 +24,24 @@ const pscaleTokenID = Bun.env.PLANETSCALE_API_TOKEN_ID;
 const pscaleToken = Bun.env.PLANETSCALE_API_TOKEN;
 const pscaleAuth = `${pscaleTokenID}:${pscaleToken}`;
 const pscaleOrg = Bun.env.PLANETSCALE_ORG;
+const level = Bun.env.LOG_LEVEL ?? "info";
 
-Bun.serve({
+const logger = pino({
+  level,
+  transport: {
+    target: "pino-pretty",
+    options: {
+      colorize: true,
+    },
+  },
+});
+
+const server = Bun.serve({
   port: Bun.env.PORT ?? "3000",
 
   async fetch(request) {
+    logger.info({ method: request.method, url: request.url }, "request");
+
     // Do nothing with the OAuth callback, for now. Just return a 200.
     if (new URL(request.url).pathname === "/oauth/callback") {
       return Response.json({ ok: true }, { status: 200 });
@@ -36,7 +50,6 @@ Bun.serve({
     // Parsing with Zod strips unknown Copilot-specific fields in the request
     // body, which cause OpenAI errors if they're included.
     const json = await request.json();
-    console.debug("received", json);
     const input = Input.safeParse(json);
 
     if (!input.success) {
@@ -51,6 +64,8 @@ Bun.serve({
     });
   },
 });
+
+logger.info({ port: server.port }, "listening");
 
 function handleRequest(messages: Message[]) {
   const ps = new PscaleClient();
@@ -226,10 +241,14 @@ function handleRequest(messages: Message[]) {
   return new ReadableStream({
     async start(controller) {
       runner.on("end", () => {
+        logger.debug("runner.end");
         controller.close();
       });
 
       runner.on("chunk", (chunk) => {
+        logger.debug({ chunk }, "runner.chunk");
+
+        // This currently breaks Visual Studio code.
         if (chunk.choices.at(0)?.finish_reason === "tool_calls") {
           return;
         }
@@ -239,6 +258,8 @@ function handleRequest(messages: Message[]) {
       });
 
       ps.on("update", (update) => {
+        logger.debug({ update }, "ps.update");
+
         const chunk: ChatCompletionChunk = {
           id: "chunk",
           object: "chat.completion.chunk",
@@ -255,6 +276,7 @@ function handleRequest(messages: Message[]) {
     },
 
     cancel() {
+      logger.debug("stream.cancel");
       runner.abort();
     },
   });
@@ -266,7 +288,9 @@ class PscaleClient {
   async fetch(path: string, init?: RequestInit) {
     const method = init?.method ?? "GET";
     this.#emitter.emit("update", `\`${method} ${path}\`...`);
-    console.debug(`Fetching ${method} ${path}...`);
+
+    const startTime = process.hrtime.bigint();
+    logger.info({ method, path }, "fetch.start");
 
     const resp = await fetch(
       `https://api.planetscale.com/v1/organizations/${pscaleOrg}${path}`,
@@ -278,6 +302,16 @@ class PscaleClient {
         ...init,
         method,
       },
+    );
+
+    logger.info(
+      {
+        method,
+        path,
+        status: resp.status,
+        durationMs: Number(process.hrtime.bigint() - startTime) / 1e6,
+      },
+      "fetch.end",
     );
 
     if (!resp.ok) {
