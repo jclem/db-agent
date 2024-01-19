@@ -262,7 +262,7 @@ function handleRequest(messages: Message[]) {
       runner.on("chunk", (chunk) => {
         logger.debug({ chunk }, "runner.chunk");
 
-        // This currently breaks Visual Studio code.
+        // This currently breaks Visual Studio Code.
         if (chunk.choices.at(0)?.finish_reason === "tool_calls") {
           return;
         }
@@ -349,9 +349,5 @@ class PscaleClient {
 
   on(event: "update", listener: (content: string) => void) {
     this.#emitter.on(event, listener);
-  }
-
-  update(content: string) {
-    this.#emitter.emit("update", `${content}  \n\n`);
   }
 }
