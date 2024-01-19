@@ -57,6 +57,11 @@ const server = Bun.serve({
     }
 
     const responseStream = handleRequest(input.data.messages);
+
+    request.signal.addEventListener("abort", () => {
+      responseStream.cancel();
+    });
+
     return new Response(responseStream, {
       headers: {
         "content-type": "text/event-stream",
