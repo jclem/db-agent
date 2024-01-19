@@ -237,6 +237,20 @@ function handleRequest(messages: Message[]) {
     ],
   });
 
+  runner.on("functionCall", (call) => {
+    logger.info(
+      {
+        functionName: call.name,
+        arguments: call.arguments,
+      },
+      "runner.functionCall",
+    );
+  });
+
+  runner.on("functionCallResult", (result) => {
+    logger.debug({ result }, "runner.functionCallResult");
+  });
+
   // Proxy the OpenAI API response right back to the extensibility platform.
   return new ReadableStream({
     async start(controller) {
@@ -290,7 +304,7 @@ class PscaleClient {
     this.#emitter.emit("update", `\`${method} ${path}\`...`);
 
     const startTime = process.hrtime.bigint();
-    logger.info({ method, path }, "fetch.start");
+    logger.debug({ method, path }, "fetch.start");
 
     const resp = await fetch(
       `https://api.planetscale.com/v1/organizations/${pscaleOrg}${path}`,
@@ -304,7 +318,7 @@ class PscaleClient {
       },
     );
 
-    logger.info(
+    logger.debug(
       {
         method,
         path,
