@@ -98,7 +98,7 @@ function handleRequest(messages: Message[]) {
         type: "function",
         function: {
           function: function getDatabase(args: { name: string }) {
-            return ps.fetch(`/databases/${args.name}`);
+            return ps.getDatabase(args.name);
           },
           description: "Get information about a single PlanetScale database.",
           parse: JSON.parse,
@@ -294,10 +294,11 @@ function handleRequest(messages: Message[]) {
       });
 
       ps.on("reference", (reference) => {
+        logger.debug({ reference }, "ps.reference");
+
         const data = `event: copilot_references\ndata: ${JSON.stringify(
           reference,
         )}\n\n`;
-        console.debug(data);
         controller.enqueue(data);
       });
     },
@@ -309,6 +310,13 @@ function handleRequest(messages: Message[]) {
   });
 }
 
+const PSDb = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+type PSDb = z.infer<typeof PSDb>;
+
 class PscaleClient {
   readonly #emitter = new EventEmitter();
 
@@ -319,36 +327,26 @@ class PscaleClient {
       return result;
     }
 
-    const databases = z
-      .object({
-        data: z.array(
-          z.object({
-            id: z.string(),
-            name: z.string(),
-          }),
-        ),
-      })
-      .parse(result.data).data;
+    const databases = z.object({ data: z.array(PSDb) }).parse(result.data).data;
+    this.#emitDatabasesReference(databases);
+    return result;
+  }
 
-    this.emitReference(
-      databases.map((db) => ({
-        type: "planetscale.database",
-        id: db.id,
-        data: db,
-        metadata: {
-          display_name: db.name,
-          display_icon:
-            "https://avatars.githubusercontent.com/u/35612527?s=64&v=4",
-        },
-      })),
-    );
+  async getDatabase(name: string) {
+    const result = await this.fetch(`/databases/${name}`);
 
+    if (!result.ok) {
+      return result;
+    }
+
+    const database = z.object({ data: PSDb }).parse(result.data).data;
+    this.#emitDatabasesReference([database]);
     return result;
   }
 
   async fetch(path: string, init?: RequestInit) {
     const method = init?.method ?? "GET";
-    this.#emitter.emit("update", `\`${method} ${path}\`...`);
+    this.#emitter.emit("update", `\`${method} ${path}...`);
 
     const startTime = process.hrtime.bigint();
     logger.debug({ method, path }, "fetch.start");
@@ -376,7 +374,7 @@ class PscaleClient {
     );
 
     if (!resp.ok) {
-      this.#emitter.emit("update", `\`Error ${resp.status}\`  \n`);
+      this.#emitter.emit("update", `Error ${resp.status}\`  \n`);
 
       return {
         ok: false,
@@ -386,7 +384,7 @@ class PscaleClient {
       };
     }
 
-    this.#emitter.emit("update", "`OK`  \n\n");
+    this.#emitter.emit("update", "OK`  \n\n");
 
     return {
       ok: true,
@@ -407,7 +405,19 @@ class PscaleClient {
     this.#emitter.emit("update", `${content}  \n\n`);
   }
 
-  emitReference(reference: unknown) {
-    this.#emitter.emit("reference", reference);
+  #emitDatabasesReference(dbs: PSDb[]) {
+    this.#emitter.emit(
+      "reference",
+      dbs.map((db) => ({
+        type: "planetscale.database",
+        id: db.id,
+        data: db,
+        metadata: {
+          display_name: db.name,
+          display_icon:
+            "https://avatars.githubusercontent.com/u/35612527?s=64&v=4",
+        },
+      })),
+    );
   }
 }
