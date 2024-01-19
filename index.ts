@@ -36,7 +36,6 @@ Bun.serve({
     // Parsing with Zod strips unknown Copilot-specific fields in the request
     // body, which cause OpenAI errors if they're included.
     const json = await request.json();
-    console.debug("received", json);
     const input = Input.safeParse(json);
 
     if (!input.success) {
@@ -64,7 +63,7 @@ function handleRequest(messages: Message[]) {
         type: "function",
         function: {
           function: function listDatabases() {
-            return ps.fetch("/databases");
+            return ps.listDatabases();
           },
           description: "List all PlanetScale databases.",
           parameters: {
@@ -250,6 +249,15 @@ function handleRequest(messages: Message[]) {
         };
 
         const data = `data: ${JSON.stringify(chunk)}\n\n`;
+        console.debug(data);
+        controller.enqueue(data);
+      });
+
+      ps.on("reference", (reference) => {
+        const data = `event: copilot_references\ndata: ${JSON.stringify(
+          reference,
+        )}\n\n`;
+        console.debug(data);
         controller.enqueue(data);
       });
     },
@@ -260,10 +268,56 @@ function handleRequest(messages: Message[]) {
   });
 }
 
+type PSFetchResult =
+  | {
+      ok: false;
+      status: number;
+      statusText: string;
+      body: unknown;
+    }
+  | {
+      ok: true;
+      data: unknown;
+    };
+
 class PscaleClient {
   readonly #emitter = new EventEmitter();
 
-  async fetch(path: string, init?: RequestInit) {
+  async listDatabases() {
+    const result = await this.fetch("/databases");
+
+    if (!result.ok) {
+      return result;
+    }
+
+    const databases = z
+      .object({
+        data: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+          }),
+        ),
+      })
+      .parse(result.data).data;
+
+    this.emitReference(
+      databases.map((db) => ({
+        type: "planetscale.database",
+        id: db.id,
+        data: db,
+        metadata: {
+          display_name: db.name,
+          display_icon:
+            "https://avatars.githubusercontent.com/u/35612527?s=64&v=4",
+        },
+      })),
+    );
+
+    return result;
+  }
+
+  async fetch(path: string, init?: RequestInit): Promise<PSFetchResult> {
     const method = init?.method ?? "GET";
     this.#emitter.emit("update", `\`${method} ${path}\`...`);
     console.debug(`Fetching ${method} ${path}...`);
@@ -299,11 +353,20 @@ class PscaleClient {
     };
   }
 
-  on(event: "update", listener: (content: string) => void) {
+  on(event: "update", listener: (content: string) => void): void;
+  on(event: "reference", listener: (content: unknown) => void): void;
+  on(
+    event: "update" | "reference",
+    listener: (content: string) => void | ((content: unknown) => void),
+  ): void {
     this.#emitter.on(event, listener);
   }
 
   update(content: string) {
     this.#emitter.emit("update", `${content}  \n\n`);
+  }
+
+  emitReference(reference: unknown) {
+    this.#emitter.emit("reference", reference);
   }
 }
