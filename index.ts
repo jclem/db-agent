@@ -84,7 +84,7 @@ function handleRequest(messages: Message[]) {
         type: "function",
         function: {
           function: function listDatabases() {
-            return ps.fetch("/databases");
+            return ps.listDatabases();
           },
           description: "List all PlanetScale databases.",
           parameters: {
@@ -292,6 +292,14 @@ function handleRequest(messages: Message[]) {
         const data = `data: ${JSON.stringify(chunk)}\n\n`;
         controller.enqueue(data);
       });
+
+      ps.on("reference", (reference) => {
+        const data = `event: copilot_references\ndata: ${JSON.stringify(
+          reference,
+        )}\n\n`;
+        console.debug(data);
+        controller.enqueue(data);
+      });
     },
 
     cancel() {
@@ -303,6 +311,40 @@ function handleRequest(messages: Message[]) {
 
 class PscaleClient {
   readonly #emitter = new EventEmitter();
+
+  async listDatabases() {
+    const result = await this.fetch("/databases");
+
+    if (!result.ok) {
+      return result;
+    }
+
+    const databases = z
+      .object({
+        data: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+          }),
+        ),
+      })
+      .parse(result.data).data;
+
+    this.emitReference(
+      databases.map((db) => ({
+        type: "planetscale.database",
+        id: db.id,
+        data: db,
+        metadata: {
+          display_name: db.name,
+          display_icon:
+            "https://avatars.githubusercontent.com/u/35612527?s=64&v=4",
+        },
+      })),
+    );
+
+    return result;
+  }
 
   async fetch(path: string, init?: RequestInit) {
     const method = init?.method ?? "GET";
@@ -352,7 +394,20 @@ class PscaleClient {
     };
   }
 
-  on(event: "update", listener: (content: string) => void) {
+  on(event: "update", listener: (content: string) => void): void;
+  on(event: "reference", listener: (content: unknown) => void): void;
+  on(
+    event: "update" | "reference",
+    listener: (content: string) => void | ((content: unknown) => void),
+  ): void {
     this.#emitter.on(event, listener);
+  }
+
+  update(content: string) {
+    this.#emitter.emit("update", `${content}  \n\n`);
+  }
+
+  emitReference(reference: unknown) {
+    this.#emitter.emit("reference", reference);
   }
 }
