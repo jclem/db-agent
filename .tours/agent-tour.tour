@@ -1,0 +1,66 @@
+{
+  "$schema": "https://aka.ms/codetour-schema",
+  "title": "Agent Tour",
+  "steps": [
+    {
+      "title": "Introduction",
+      "description": "This repository contains a simple agent that allows a user to chat about databases they have on [PlanetScale](https://planetscale.com/), a database-as-a-service provider. It uses the Bun JavaScript runtime."
+    },
+    {
+      "file": "index.ts",
+      "selection": {
+        "start": {
+          "line": 52,
+          "character": 1
+        },
+        "end": {
+          "line": 53,
+          "character": 41
+        }
+      },
+      "description": "When a request is recieved, this agent uses a Zod schema just to validate that the parameters are what we expect. This also has the benefit of removing Copilot-specific fields, such as \"copilot_references\", that will cause OpenAI to return an error."
+    },
+    {
+      "file": "index.ts",
+      "description": "We pass the incoming request messages to a `handleRequest` function. This function returns a ReadableStream, which is used as the response body below, on line 65.",
+      "line": 59
+    },
+    {
+      "file": "index.ts",
+      "description": "This is the bulk of the logic for this simple agent. We're using a beta feature of the OpenAI Node SDK called `runTools`. It accepts as its primary inputs the list of messages and a set of \"tools\", which in this case are functions that can be called, in order to gather context for answering user queries. All of the functions provided in this example call PlanetScale APIs. Let's look at one of those tools.",
+      "line": 78
+    },
+    {
+      "file": "index.ts",
+      "description": "This function lists all PlanetScale databases that belong to the user by calling `ps.listDatabases()` on our simple PlanetScale client. The model will use the provided description and description of function parameters (in this case, there are none), to request to have this function invoked whenever it may be useful to answer a user query. The OpenAI SDK will automatically call the actual function for us, and pass the results back to the model again until the model chooses to eventually return an actual streaming response to the user.",
+      "line": 96
+    },
+    {
+      "file": "index.ts",
+      "description": "Here, we're creating the ReadableStream that is used to send a final response back to the platform, which in turn proxies that response back to the chat client. The \"runner\" object returned by the OpenAI SDK emits events that we can listen on to determine when we need to stream content back.",
+      "line": 260
+    },
+    {
+      "file": "index.ts",
+      "description": "Here, we are listening for the \"chunk\" event. This event is called when a textual content chunk is returned by the model. There is a special case handled where some clients don't like the \"tool_calls\" finish reason (work is in progress to fix this), and so we're filtering it out here. Otherwise, we form a server-sent event (line 275) and enqueue that data on the stream to be sent back in the response.",
+      "line": 277
+    },
+    {
+      "file": "index.ts",
+      "description": "Eventually, the platform will support upstream agents notifying clients of actions that they're taking in a more formal way. For now, in this example, the simple PlanetScale client we've built emits an \"update\" event whenever one of its methods like `ps.listDatabases()` is called—we use this update to stream a response chunk down to the user that says things like \"Listing databases...\" Providing status updates like this are a great way to mitigate the inherent latency of using large language models—especially the added latency as a result of tool-calling loops.",
+      "line": 294
+    },
+    {
+      "file": "index.ts",
+      "description": "This is very similar to the last step—instead of a status update, this is the PlanetScale client telling us that a \"reference\" was used. In the future, clients will render these references in order to notify the user of exactly what pieces of information were used to formulate a resopnse. These references are persisted in conversation history, as well, for future consumption.",
+      "line": 303
+    },
+    {
+      "file": "index.ts",
+      "description": "This is a simple PlanetScale API client built for this demo agent. It's really just a little wrapper around `fetch` calls and an event emitter. The OpenAI SDK tool-runner calls methods on it such as `listDatabases()` or `getDatabase(name)` in order to respond to user queries.",
+      "line": 320
+    }
+  ],
+  "ref": "b3511f9af5b9046ddcac4ff187d46451f61c02ee",
+  "isPrimary": true
+}
